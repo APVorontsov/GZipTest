@@ -12,6 +12,8 @@ namespace GZipTest
 
         private volatile int _currentSegment = 0;
 
+        private volatile bool _isAborted;
+
         private readonly int _length;
 
         private readonly Dictionary<int, MemoryStream> _segments;
@@ -19,8 +21,6 @@ namespace GZipTest
         private readonly Dictionary<int, Action> _callbacks;
 
         private readonly FileStream _writeFileStream;
-
-        private bool _isAborted;
 
         public event EventHandler<SuccessEventArgs> OnSuccess;
 

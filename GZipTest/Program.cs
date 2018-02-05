@@ -9,6 +9,8 @@ namespace GZipTest
         public static void Main(string[] args)
         {
             var stopwatch = new Stopwatch();
+            stopwatch.Start();
+
             if (args == null || args.Length == 0)
             {
                 //var source = @"E:\JOB\GZipTest\test files\test.txt";
@@ -18,7 +20,6 @@ namespace GZipTest
                 var dest = @"G:\test.txt.gz";
                 dest = $"{source}.gz";
 
-                stopwatch.Start();
                 GzipCompressor.CompressFile(source, dest, SuccessCallback(stopwatch), ErrorCallback);
             }
             else
