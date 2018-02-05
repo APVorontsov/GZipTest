@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.IO;
 using System.Threading;
 
@@ -7,13 +8,22 @@ namespace GZipTest
 {
     public class FileSegmentWriter
     {
+        private static readonly int BufferLength = int.Parse(ConfigurationManager.AppSettings["BufferSize"]);
+
         private volatile int _currentSegment = 0;
+
         private readonly int _length;
+
         private readonly Dictionary<int, MemoryStream> _segments;
+
         private readonly Dictionary<int, Action> _callbacks;
+
         private readonly FileStream _writeFileStream;
+
         private bool _isAborted;
+
         public event EventHandler<SuccessEventArgs> OnSuccess;
+
         public event EventHandler<ErrorEventArgs> OnError;
 
         public FileSegmentWriter(int length, string destFile, EventHandler<SuccessEventArgs> successCallback, EventHandler<ErrorEventArgs> errorCallback)
@@ -25,6 +35,7 @@ namespace GZipTest
 
             OnSuccess += successCallback;
             OnSuccess += (sender, args) => _writeFileStream?.Dispose();
+
             OnError += errorCallback;
             OnError += (sender, args) =>
             {
@@ -44,8 +55,7 @@ namespace GZipTest
                 {
                     if (_segments.ContainsKey(_currentSegment))
                     {
-                        const int bufferLength = 1024 * 1024; //1 Megabyte
-                        var buffer = new byte[bufferLength];
+                        var buffer = new byte[BufferLength];
                         int bytesCount;
                         var compressedStream = _segments[_currentSegment];
 
@@ -73,11 +83,14 @@ namespace GZipTest
                 catch (Exception e)
                 {
                     OnError?.Invoke(this, new ErrorEventArgs(e, e.Message));
-                    //throw;
                 }
             }
 
-            if (_isAborted == false)
+            if (_isAborted)
+            {
+                OnError?.Invoke(this,new ErrorEventArgs(new Exception("The operation was aborted."), "The operation was aborted."));
+            }
+            else
             {
                 OnSuccess?.Invoke(this, new SuccessEventArgs());
             }

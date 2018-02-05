@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Configuration;
 using System.IO;
 using System.IO.Compression;
 using System.Threading;
@@ -8,27 +8,41 @@ namespace GZipTest
 {
     public class GzipCompressor
     {
+        private static readonly int BufferLength = int.Parse(ConfigurationManager.AppSettings["BufferSize"]);
+
         private readonly object _readFileLock = new object();
 
         private readonly object _callbackLock = new object();
 
         private readonly FileStream _originalFileStream;
 
-        //private readonly IList<Thread> _workingThreads = new List<Thread>();
-
         private readonly int _segmentsCount;
-
-        private readonly int _bufferLength = 1024 * 1024;
 
         private readonly FileSegmentWriter _fileSegmentWriter;
 
         private volatile int _segmentNumber;
 
-        private bool _isCallbackInvoked = false;
+        private volatile bool _isCallbackInvoked = false;
 
         private event EventHandler<SuccessEventArgs> OnSuccess;
 
         private event EventHandler<ErrorEventArgs> OnError;
+
+        public GzipCompressor(string sourceFile, string destFile)
+        {
+            var fileToCompress = new FileInfo(sourceFile);
+            _originalFileStream = fileToCompress.OpenRead();
+
+            OnSuccess += (sender, args) => _originalFileStream?.Dispose();
+            OnError += (sender, args) =>
+            {
+                _originalFileStream?.Dispose();
+                _fileSegmentWriter.Abort();
+            };
+
+            _segmentsCount = (int)Math.Ceiling((double)fileToCompress.Length / BufferLength);
+            _fileSegmentWriter = new FileSegmentWriter(_segmentsCount, destFile, OnSuccessInvoke, OnErrorInvoke);
+        }
 
         public static void CompressFile(string sourceFile, string destinationFile, EventHandler<SuccessEventArgs> successCallback, EventHandler<ErrorEventArgs> errorCallback)
         {
@@ -46,20 +60,22 @@ namespace GZipTest
 
         }
 
-        public GzipCompressor(string sourceFile, string destFile)
+        public static void DecompressFile(string sourceFile, string destinationFile)
         {
-            var fileToCompress = new FileInfo(sourceFile);
-            _originalFileStream = fileToCompress.OpenRead();
-
-            OnSuccess += (sender, args) => _originalFileStream?.Dispose();
-            OnError += (sender, args) =>
+            var fileToDecompress = new FileInfo(sourceFile);
+            using (FileStream originalFileStream = fileToDecompress.OpenRead())
             {
-                _originalFileStream?.Dispose();
-                _fileSegmentWriter.Abort();
-            };
-
-            _segmentsCount = (int) Math.Ceiling((double) fileToCompress.Length / _bufferLength);
-            _fileSegmentWriter = new FileSegmentWriter(_segmentsCount, destFile, OnSuccessInvoke, OnErrorInvoke);
+                using (FileStream decompressedFileStream = File.Create(destinationFile))
+                {
+                    using (GZipStream decompressionStream =
+                        new GZipStream(originalFileStream, CompressionMode.Decompress))
+                    {
+                        var buffer = new byte[BufferLength];
+                        var bytesCount = decompressionStream.Read(buffer, 0, buffer.Length);
+                        decompressedFileStream.Write(buffer, 0, bytesCount);
+                    }
+                }
+            }
         }
 
         private void Compress()
@@ -68,14 +84,7 @@ namespace GZipTest
             {
                 for (int i = 0; i < Environment.ProcessorCount; i++)
                 {
-                    var coreNumber = i;
-                    var worker = new Thread(() =>
-                    {
-                        CompressOnCore();
-                    });
-
-                    //_workingThreads.Add(worker);
-                    worker.Start();
+                    new Thread(CompressAsParallel).Start();
                 }
             }
             catch (Exception e)
@@ -84,15 +93,13 @@ namespace GZipTest
             }
         }
 
-        private void CompressOnCore()
+        private void CompressAsParallel()
         {
             try
             {
-                //CurrentThread.ProcessorAffinity = new IntPtr(coreNumber + 1);
-                //Thread.BeginThreadAffinity();
                 while (_segmentNumber < _segmentsCount)
                 {
-                    var buffer = new byte[_bufferLength];
+                    var buffer = new byte[BufferLength];
                     int bytesCount;
                     int currentSegment;
                     lock (_readFileLock)
@@ -150,35 +157,5 @@ namespace GZipTest
                 }
             }
         }
-
-        public void Decompress(string sourceFile, string destinationFile)
-        {
-            var fileToDecompress = new FileInfo(sourceFile);
-            using (FileStream originalFileStream = fileToDecompress.OpenRead())
-            {
-                using (FileStream decompressedFileStream = File.Create(destinationFile))
-                {
-                    using (GZipStream decompressionStream =
-                        new GZipStream(originalFileStream, CompressionMode.Decompress))
-                    {
-                        var buffer = new byte[100];
-                        var bytesCount = decompressionStream.Read(buffer, 0, buffer.Length);
-                        decompressedFileStream.Write(buffer, 0, bytesCount);
-                    }
-                }
-            }
-        }
-
-        //[DllImport("kernel32.dll")]
-        //public static extern int GetCurrentThreadId();
-
-        //private ProcessThread CurrentThread
-        //{
-        //    get
-        //    {
-        //        int id = GetCurrentThreadId();
-        //        return Process.GetCurrentProcess().Threads.Cast<ProcessThread>().Single(th => th.Id == id);
-        //    }
-        //}
     }
 }
